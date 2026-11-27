@@ -27,5 +27,13 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.HandleFunc("POST /appointments/cancel-coded", func(w http.ResponseWriter, r *http.Request) {
+		c := scheduling.Caller{UserID: r.Header.Get("X-User"), FacilityID: r.Header.Get("X-Facility")}
+		if err := s.CancelWithCode(r.Context(), c, r.FormValue("id"), r.FormValue("code"), r.FormValue("note")); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	log.Fatal(http.ListenAndServe(":8080", mux))
 }
