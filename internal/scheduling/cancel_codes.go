@@ -2,9 +2,8 @@ package scheduling
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"strings"
+	"unicode/utf8"
 )
 
 // CancelReasons maps each allowed cancel reason code to its label.
@@ -16,17 +15,20 @@ var CancelReasons = map[string]string{
 	"other":                "Other",
 }
 
+// minOtherNoteRunes is the shortest trimmed note accepted with code "other".
+const minOtherNoteRunes = 10
+
 // CancelWithCode cancels a booked appointment with a coded reason and an optional note.
 func (s *Service) CancelWithCode(ctx context.Context, c Caller, id, code, note string) error {
 	label, ok := CancelReasons[code]
 	if !ok {
 		return ErrInvalid
 	}
-	var status string
-	err := s.DB.QueryRowContext(ctx, `SELECT status FROM appointments WHERE id = ?`, id).Scan(&status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+	note = strings.TrimSpace(note)
+	if code == "other" && utf8.RuneCountInString(note) < minOtherNoteRunes {
+		return ErrInvalid
 	}
+	status, err := s.authorize(ctx, c, id)
 	if err != nil {
 		return err
 	}
@@ -34,9 +36,20 @@ func (s *Service) CancelWithCode(ctx context.Context, c Caller, id, code, note s
 		return ErrTerminal
 	}
 	var notes any
-	if n := strings.TrimSpace(note); n != "" {
-		notes = n
+	if note != "" {
+		notes = note
 	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE appointments SET status = 'cancelled', cancel_reason = ?, cancel_reason_code = ?, cancel_notes = ? WHERE id = ? AND status <> 'cancelled'`, label, code, notes, id)
-	return err
+	res, err := s.DB.ExecContext(ctx, `UPDATE appointments SET status = 'cancelled', cancel_reason = ?, cancel_reason_code = ?, cancel_notes = ? WHERE id = ? AND status <> 'cancelled'`, label, code, notes, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		// Another cancel landed between authorize and this update.
+		return ErrTerminal
+	}
+	return nil
 }

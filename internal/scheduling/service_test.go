@@ -39,6 +39,11 @@ func TestCancel_AlreadyCancelledRefused(t *testing.T) {
 	if !errors.Is(err, ErrTerminal) {
 		t.Fatalf("want ErrTerminal, got %v", err)
 	}
+	var r string
+	s.DB.QueryRow(`SELECT cancel_reason FROM appointments WHERE id='a2'`).Scan(&r)
+	if r != "patient called, travelling" {
+		t.Fatalf("first reason overwritten: %q", r)
+	}
 }
 
 func TestCancel_EmptyReasonRefused(t *testing.T) {
