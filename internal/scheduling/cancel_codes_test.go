@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 
@@ -43,16 +44,42 @@ func TestAC1_UnknownCodeRefused(t *testing.T) {
 	}
 }
 
+// listedCodes is the fixed list of reason codes.
+var listedCodes = []string{"patient_request", "provider_unavailable", "clinic_closure", "booked_in_error", "other"}
+
+// wantLabels is the label stored in cancel_reason for each code.
+var wantLabels = map[string]string{
+	"patient_request":      "Patient requested cancellation",
+	"provider_unavailable": "Provider unavailable",
+	"clinic_closure":       "Clinic or service closed",
+	"booked_in_error":      "Booked in error",
+	"other":                "Other",
+}
+
+func TestAC1_FixedCodeList(t *testing.T) {
+	var got []string
+	for code := range CancelReasons {
+		got = append(got, code)
+	}
+	want := slices.Clone(listedCodes)
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("codes %v, want exactly %v", got, want)
+	}
+}
+
 func TestAC1_EveryListedCodeAccepted(t *testing.T) {
-	for _, code := range []string{"patient_request", "provider_unavailable", "clinic_closure", "booked_in_error", "other"} {
+	for _, code := range listedCodes {
 		t.Run(code, func(t *testing.T) {
 			s := &Service{DB: db.OpenTest(t)}
-			if err := s.CancelWithCode(context.Background(), Caller{"u1", "f1"}, "a1", code, "a note long enough"); err != nil {
+			if err := s.CancelWithCode(context.Background(), Caller{"u1", "f1"}, "a1", code, " a note long enough "); err != nil {
 				t.Fatal(err)
 			}
 			got := readCancelRow(t, s.DB, "a1")
-			if got.Status != "cancelled" || got.Code != code {
-				t.Fatalf("got %+v", got)
+			want := cancelRow{Status: "cancelled", Reason: wantLabels[code], Code: code, Notes: sql.NullString{String: "a note long enough", Valid: true}}
+			if got != want {
+				t.Fatalf("got %+v, want %+v", got, want)
 			}
 		})
 	}

@@ -18,17 +18,25 @@ func execFile(t *testing.T, d *sql.DB, name string) {
 	}
 }
 
-func columns(t *testing.T, d *sql.DB) []string {
+type column struct {
+	Name, Type string
+	NotNull    bool
+	Default    sql.NullString
+	PK         int
+}
+
+// columns returns the full definition of every appointments column, in order.
+func columns(t *testing.T, d *sql.DB) []column {
 	t.Helper()
-	rows, err := d.Query(`SELECT name FROM pragma_table_info('appointments') ORDER BY cid`)
+	rows, err := d.Query(`SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info('appointments') ORDER BY cid`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	var cols []string
+	var cols []column
 	for rows.Next() {
-		var c string
-		if err := rows.Scan(&c); err != nil {
+		var c column
+		if err := rows.Scan(&c.Name, &c.Type, &c.NotNull, &c.Default, &c.PK); err != nil {
 			t.Fatal(err)
 		}
 		cols = append(cols, c)
@@ -37,6 +45,33 @@ func columns(t *testing.T, d *sql.DB) []string {
 		t.Fatal(err)
 	}
 	return cols
+}
+
+// newColumns returns cancel_reason_code and cancel_notes for every row, by id.
+// A NULL code fails the scan.
+func newColumns(t *testing.T, d *sql.DB) map[string]sql.NullString {
+	t.Helper()
+	rows, err := d.Query(`SELECT id, cancel_reason_code, cancel_notes FROM appointments ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	notes := map[string]sql.NullString{}
+	for rows.Next() {
+		var id, code string
+		var n sql.NullString
+		if err := rows.Scan(&id, &code, &n); err != nil {
+			t.Fatalf("scan new columns: %v", err)
+		}
+		if code != "" {
+			t.Fatalf("%s: cancel_reason_code %q, want empty", id, code)
+		}
+		notes[id] = n
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return notes
 }
 
 type baseRow struct{ ID, Facility, Patient, Status, Reason string }
@@ -86,15 +121,14 @@ func TestAC4_P2_Migration002KeepsRows(t *testing.T) {
 	if got := baseRows(t, d); !reflect.DeepEqual(got, before) {
 		t.Fatalf("up changed existing rows:\n got %+v\nwant %+v", got, before)
 	}
-	var withCode, withNotes int
-	if err := d.QueryRow(`SELECT
-		COUNT(*) FILTER (WHERE cancel_reason_code <> ''),
-		COUNT(*) FILTER (WHERE cancel_notes IS NOT NULL)
-		FROM appointments`).Scan(&withCode, &withNotes); err != nil {
-		t.Fatal(err)
+	notes := newColumns(t, d)
+	if len(notes) != len(before) {
+		t.Fatalf("read %d rows after up, want %d", len(notes), len(before))
 	}
-	if withCode != 0 || withNotes != 0 {
-		t.Fatalf("existing rows got %d codes and %d notes, want none", withCode, withNotes)
+	for id, n := range notes {
+		if n.Valid {
+			t.Fatalf("%s: cancel_notes %q, want NULL", id, n.String)
+		}
 	}
 
 	execFile(t, d, "002_cancel_reason_code.down.sql")
