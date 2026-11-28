@@ -17,7 +17,10 @@ func main() {
 	if err := db.Up(d); err != nil {
 		log.Fatal(err)
 	}
-	s := &scheduling.Service{DB: d}
+	log.Fatal(http.ListenAndServe(":8080", newMux(&scheduling.Service{DB: d})))
+}
+
+func newMux(s *scheduling.Service) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /appointments/cancel", func(w http.ResponseWriter, r *http.Request) {
 		c := scheduling.Caller{UserID: r.Header.Get("X-User"), FacilityID: r.Header.Get("X-Facility")}
@@ -27,5 +30,13 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	mux.HandleFunc("POST /appointments/cancel-coded", func(w http.ResponseWriter, r *http.Request) {
+		c := scheduling.Caller{UserID: r.Header.Get("X-User"), FacilityID: r.Header.Get("X-Facility")}
+		if err := s.CancelWithCode(r.Context(), c, r.FormValue("id"), r.FormValue("code"), r.FormValue("note")); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	return mux
 }
