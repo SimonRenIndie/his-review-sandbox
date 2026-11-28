@@ -1,4 +1,4 @@
-// Command app serves the appointment endpoints.
+// Command app serves the appointment HTTP endpoints.
 package main
 
 import (
