@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 
@@ -37,6 +38,16 @@ func newMux(s *scheduling.Service) *http.ServeMux {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("GET /appointments/cancellation-counts", func(w http.ResponseWriter, r *http.Request) {
+		c := scheduling.Caller{UserID: r.Header.Get("X-User"), FacilityID: r.Header.Get("X-Facility")}
+		counts, err := s.CancellationCounts(r.Context(), c)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(counts)
 	})
 	return mux
 }
