@@ -1,12 +1,15 @@
 package scheduling
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // CancellationCounts returns how many of the caller's facility's appointments
 // were cancelled with each reason code. Cancellations made before reason codes
 // existed are counted under "uncoded".
 func (s *Service) CancellationCounts(ctx context.Context, c Caller) (map[string]int, error) {
-	if c.FacilityID == "" {
+	if strings.TrimSpace(c.FacilityID) == "" {
 		return nil, ErrForbidden
 	}
 	rows, err := s.DB.QueryContext(ctx, `

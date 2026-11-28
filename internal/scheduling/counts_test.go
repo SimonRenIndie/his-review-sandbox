@@ -38,7 +38,9 @@ func TestAC1_OtherFacilityNotCounted(t *testing.T) {
 
 func TestAC3_NoFacilityRefused(t *testing.T) {
 	s := &Service{DB: db.OpenTest(t)}
-	if _, err := s.CancellationCounts(context.Background(), Caller{}); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("want ErrForbidden, got %v", err)
+	for _, c := range []Caller{{}, {"u1", "  "}} {
+		if _, err := s.CancellationCounts(context.Background(), c); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("caller %+v: want ErrForbidden, got %v", c, err)
+		}
 	}
 }

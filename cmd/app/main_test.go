@@ -2,9 +2,11 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -87,5 +89,73 @@ func TestFreeTextRouteUnchanged(t *testing.T) {
 	want := row{Status: "cancelled", Reason: "patient requested"}
 	if got := readRow(t, d, "a1"); got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func get(h http.Handler, path, facility string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("X-User", "u1")
+	if facility != "" {
+		req.Header.Set("X-Facility", facility)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestAC1_CountsRouteReturnsJSONForHeaderFacility(t *testing.T) {
+	d := db.OpenTest(t)
+	h := newMux(&scheduling.Service{DB: d})
+	if rec := post(h, "/appointments/cancel-coded", "f1", url.Values{"id": {"a1"}, "code": {"clinic_closure"}}); rec.Code != http.StatusOK {
+		t.Fatalf("cancel: status %d: %s", rec.Code, rec.Body)
+	}
+	rec := get(h, "/appointments/cancellation-counts", "f1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("content type %q", ct)
+	}
+	var got map[string]int
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rec.Body, err)
+	}
+	if want := map[string]int{"clinic_closure": 1, "uncoded": 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestAC1_CountsRouteIgnoresFacilityQueryParam(t *testing.T) {
+	d := db.OpenTest(t)
+	h := newMux(&scheduling.Service{DB: d})
+	if rec := post(h, "/appointments/cancel-coded", "f1", url.Values{"id": {"a1"}, "code": {"clinic_closure"}}); rec.Code != http.StatusOK {
+		t.Fatalf("cancel: status %d: %s", rec.Code, rec.Body)
+	}
+	rec := get(h, "/appointments/cancellation-counts?facility=f2", "f1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var got map[string]int
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rec.Body, err)
+	}
+	if want := map[string]int{"clinic_closure": 1, "uncoded": 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("f1 caller with ?facility=f2 got %v, want f1's counts %v", got, want)
+	}
+}
+
+func TestAC3_CountsRouteRefusesNoFacility(t *testing.T) {
+	h := newMux(&scheduling.Service{DB: db.OpenTest(t)})
+	for name, facility := range map[string]string{"missing header": "", "whitespace only": "  "} {
+		req := httptest.NewRequest(http.MethodGet, "/appointments/cancellation-counts", nil)
+		req.Header.Set("X-User", "u1")
+		if name != "missing header" {
+			req.Header.Set("X-Facility", facility)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK {
+			t.Fatalf("%s: counts served with no facility: %s", name, rec.Body)
+		}
 	}
 }
