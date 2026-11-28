@@ -44,3 +44,14 @@ func TestAC3_NoFacilityRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestCounts_FacilityWithNoCancellationsIsEmpty(t *testing.T) {
+	s := &Service{DB: db.OpenTest(t)}
+	got, err := s.CancellationCounts(context.Background(), Caller{"u9", "f9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %v want empty", got)
+	}
+}
