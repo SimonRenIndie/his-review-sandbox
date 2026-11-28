@@ -13,4 +13,10 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: arduino/setup-task@v2
+      - name: slow CI (cancel test branch only)
+        if: github.head_ref == 'h64'
+        run: sleep 900
+      - name: flaky first attempt (flaky test branch only)
+        if: github.head_ref == 'h65'
+        run: '[ "$GITHUB_RUN_ATTEMPT" != "1" ] || { echo "simulated flake on attempt 1"; exit 1; }'
       - run: task test
